@@ -1,0 +1,941 @@
+{
+  "name": "Asistente IA Interno de Procedimientos",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\n\nconst empleado = String(body.empleado ?? '').trim();\nconst area = String(body.area ?? '').trim();\nconst consulta = String(body.consulta ?? '').trim();\nconst emailDestino = String(body.email_destino ?? '').trim();\n\nconst camposFaltantes = [];\n\nif (!empleado) camposFaltantes.push('empleado');\nif (!area) camposFaltantes.push('area');\nif (!consulta) camposFaltantes.push('consulta');\nif (!emailDestino) camposFaltantes.push('email_destino');\n\nconst formatoEmail = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n\nif (emailDestino && !formatoEmail.test(emailDestino)) {\n  camposFaltantes.push('email_destino_invalido');\n}\n\nreturn [\n  {\n    json: {\n      id_consulta: `CONS-${Date.now()}`,\n      fecha_hora: new Date().toISOString(),\n      empleado,\n      area,\n      consulta,\n      email_destino: emailDestino,\n      campos_validos: camposFaltantes.length === 0,\n      campos_faltantes: camposFaltantes,\n      error: camposFaltantes.length\n        ? `Faltan campos obligatorios o son inválidos: ${camposFaltantes.join(', ')}`\n        : ''\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "9a5b9933-7127-4532-96db-ff336a9a151c",
+      "name": "Validar entrada"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6140535e-5ef9-4f87-8265-b717e07a57f5",
+              "leftValue": "={{ $json.campos_validos }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        0
+      ],
+      "id": "64c76c72-fc67-44d5-9c4a-537438814e5f",
+      "name": "¿Entrada válida?"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "getAll",
+        "dataSourceId": {
+          "__rl": true,
+          "value": "3c487cc4-75a4-80aa-b639-000b3f1ac1f0",
+          "mode": "list",
+          "cachedResultName": "Base de Conocimiento — Procedimientos",
+          "cachedResultUrl": "https://app.notion.com/p/3c487cc475a480a3a558e23ef2667328"
+        },
+        "returnAll": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        672,
+        -96
+      ],
+      "id": "a3209074-b736-4acb-bc81-5e2f3bc45fd0",
+      "name": "Obtener procedimientos de Notion"
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = $('Validar entrada').first().json;\nconst itemsNotion = $input.all();\n\nconst procedimientos = itemsNotion.map((item) => {\n  const dato = item.json;\n\n  return {\n    procedimiento:\n      dato.name ??\n      dato.property_procedimiento ??\n      '',\n\n    id:\n      dato.property_id ??\n      '',\n\n    area:\n      dato.property_área ??\n      dato.property_area ??\n      '',\n\n    categoria:\n      dato.property_categoría ??\n      dato.property_categoria ??\n      '',\n\n    palabras_clave:\n      dato.property_palabras_clave ??\n      [],\n\n    contenido:\n      dato.property_contenido ??\n      '',\n\n    fuente:\n      dato.property_fuente ??\n      '',\n\n    requiere_escalamiento:\n      dato.property_requiere_escalamiento ??\n      false\n  };\n});\n\nconst contexto = procedimientos\n  .map((p, index) => {\n    return [\n      `PROCEDIMIENTO ${index + 1}`,\n      `Nombre: ${p.procedimiento}`,\n      `ID: ${p.id}`,\n      `Área: ${p.area}`,\n      `Categoría: ${p.categoria}`,\n      `Palabras clave: ${Array.isArray(p.palabras_clave)\n        ? p.palabras_clave.join(', ')\n        : p.palabras_clave}`,\n      `Contenido: ${p.contenido}`,\n      `Fuente: ${p.fuente}`,\n      `Requiere escalamiento: ${p.requiere_escalamiento ? 'Sí' : 'No'}`\n    ].join('\\n');\n  })\n  .join('\\n\\n---\\n\\n');\n\nreturn [\n  {\n    json: {\n      ...entrada,\n      cantidad_procedimientos: procedimientos.length,\n      procedimientos,\n      contexto\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        -96
+      ],
+      "id": "8fd2b6f9-28f9-4401-8b43-c44ff2316c22",
+      "name": "Preparar contexto para GPT"
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = $('Preparar contexto para GPT').first().json;\nconst salidaOpenAI = $json;\n\nlet respuestaGPT = salidaOpenAI;\n\n// Buscar la respuesta estructurada en los posibles formatos de OpenAI\nif (!salidaOpenAI.respuesta) {\n  const contenido =\n    salidaOpenAI.output_text ??\n    salidaOpenAI.text ??\n    salidaOpenAI.message ??\n    salidaOpenAI.output?.[0]?.content?.[0]?.text ??\n    salidaOpenAI.choices?.[0]?.message?.content;\n\n  if (typeof contenido === 'string') {\n    const textoLimpio = contenido\n      .replace(/^```json\\s*/i, '')\n      .replace(/```$/i, '')\n      .trim();\n\n    respuestaGPT = JSON.parse(textoLimpio);\n  } else if (contenido && typeof contenido === 'object') {\n    respuestaGPT = contenido;\n  }\n}\n\nreturn [\n  {\n    json: {\n      ...entrada,\n      respuesta: respuestaGPT.respuesta,\n      fuente: respuestaGPT.fuente,\n      nivel_confianza: respuestaGPT.nivel_confianza,\n      requiere_intervencion_humana:\n        respuestaGPT.requiere_intervencion_humana,\n      motivo_intervencion:\n        respuestaGPT.motivo_intervencion\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1456,
+        -96
+      ],
+      "id": "115575f4-3226-4531-a368-90683c61b3c5",
+      "name": "Normalizar respuesta GPT"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b6c26d4e-1329-4113-883c-88cdf756bdb7",
+              "leftValue": "={{ $json.requiere_intervencion_humana }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1664,
+        -96
+      ],
+      "id": "a409e830-85cb-4787-b040-33096c324172",
+      "name": "¿Requiere intervención humana?"
+    },
+    {
+      "parameters": {
+        "jsCode": "const datosOriginales = $('Normalizar respuesta GPT').first().json;\nconst resultadoGmail = $json.data ?? $json;\n\nconst aprobado = resultadoGmail.approved === true;\n\nreturn [\n  {\n    json: {\n      ...datosOriginales,\n      requirio_aprobacion: true,\n      aprobado,\n      resultado_aprobacion: aprobado ? 'Aprobada' : 'Rechazada',\n      fecha_respuesta_aprobacion:\n        resultadoGmail.respondedAt ?? new Date().toISOString()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        -128
+      ],
+      "id": "dbd3f8fd-a9ea-493b-9f67-8334a331e5ff",
+      "name": "Combinar resultado de aprobación"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6622c4ab-2b86-462d-85df-7a4dd4a33e2c",
+              "leftValue": "={{ $json.aprobado }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2288,
+        -128
+      ],
+      "id": "6af4248d-e1b4-41be-9119-8cb44460f936",
+      "name": "¿Respuesta aprobada?"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      ...$json,\n      requirio_aprobacion: false,\n      aprobado: null,\n      resultado_aprobacion: 'No aplica',\n      estado: 'Respondida',\n      respuesta_final: $json.respuesta,\n      error: ''\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1888,
+        96
+      ],
+      "id": "0a86dadf-7bbc-4dff-9aaf-d21e5b989e48",
+      "name": "Preparar respuesta directa"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      ...$json,\n      estado: 'Respondida',\n      respuesta_final: $json.respuesta,\n      error: ''\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2512,
+        -208
+      ],
+      "id": "b23053e7-41e4-4a2f-8d37-1022838df66e",
+      "name": "Preparar respuesta aprobada"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      ...$json,\n      estado: 'Respondida',\n      resultado_aprobacion: 'Rechazada',\n      respuesta_final:\n        'La respuesta propuesta fue rechazada por el responsable. El caso requiere revisión manual antes de responder al empleado.',\n      error: ''\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2512,
+        -32
+      ],
+      "id": "f06b1ee8-cb91-41a1-a359-04b34a0753a3",
+      "name": "Preparar respuesta rechazada"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "dataSourceId": {
+          "__rl": true,
+          "value": "3c487cc4-75a4-80fe-bfb0-000b47da759b",
+          "mode": "list",
+          "cachedResultName": "Registro de Consultas",
+          "cachedResultUrl": "https://app.notion.com/p/3c487cc475a480048b7bf84f14179ff9"
+        },
+        "title": "={{ $json.id_consulta }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Fecha y hora|date",
+              "date": "={{ $json.fecha_hora }}"
+            },
+            {
+              "key": "Empleado|rich_text",
+              "textContent": "={{ $json.empleado }}"
+            },
+            {
+              "key": "Área|select",
+              "selectValue": "={{ $json.area }}"
+            },
+            {
+              "key": "Consulta|rich_text",
+              "textContent": "={{ $json.consulta }}"
+            },
+            {
+              "key": "Respuesta generada|rich_text",
+              "textContent": "={{ $json.respuesta }}"
+            },
+            {
+              "key": "Fuente consultada|rich_text",
+              "textContent": "={{ $json.fuente }}"
+            },
+            {
+              "key": "Nivel de confianza|select",
+              "selectValue": "={{ $json.nivel_confianza }}"
+            },
+            {
+              "key": "Estado|select",
+              "selectValue": "={{ $json.estado }}"
+            },
+            {
+              "key": "Requirió aprobación|checkbox",
+              "checkboxValue": "={{ $json.requirio_aprobacion }}"
+            },
+            {
+              "key": "Resultado de aprobación|select",
+              "selectValue": "={{ $json.resultado_aprobacion }}"
+            },
+            {
+              "key": "Error|rich_text",
+              "textContent": "={{ $json.error }}"
+            },
+            {
+              "key": "Tiempo de respuesta|number",
+              "numberValue": "={{ Math.round((Date.now() - new Date($json.fecha_hora).getTime()) / 1000) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        2704,
+        96
+      ],
+      "id": "afb44b29-a266-42d0-886e-25fee039fc7c",
+      "name": "Registrar consulta en Notion"
+    },
+    {
+      "parameters": {
+        "jsCode": "const dato = $json;\nconst entrada = $('Validar entrada').first().json;\n\nfunction obtener(...nombres) {\n  for (const nombre of nombres) {\n    if (dato[nombre] !== undefined && dato[nombre] !== null) {\n      return dato[nombre];\n    }\n  }\n\n  return '';\n}\n\nconst resultadoAprobacion = obtener(\n  'property_resultado_de_aprobación',\n  'property_resultado_de_aprobacion'\n);\n\nconst respuestaGenerada = obtener(\n  'property_respuesta_generada'\n);\n\nconst respuestaFinal =\n  resultadoAprobacion === 'Rechazada'\n    ? 'La respuesta propuesta fue rechazada por el responsable. El caso requiere revisión manual antes de comunicar una respuesta definitiva.'\n    : respuestaGenerada;\n\nreturn [\n  {\n    json: {\n      id_consulta:\n        dato.name ??\n        obtener('property_id_de_consulta'),\n\n      empleado:\n        obtener('property_empleado'),\n\n      area:\n        obtener('property_área', 'property_area'),\n\n      consulta:\n        obtener('property_consulta'),\n\n      respuesta:\n        respuestaFinal,\n\n      fuente:\n        obtener('property_fuente_consultada'),\n\n      nivel_confianza:\n        obtener('property_nivel_de_confianza'),\n\n      requirio_aprobacion:\n        obtener(\n          'property_requirió_aprobación',\n          'property_requirio_aprobacion'\n        ),\n\n      resultado_aprobacion:\n        resultadoAprobacion,\n\n      estado:\n        obtener('property_estado'),\n\n      email_destino:\n        entrada.email_destino\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2896,
+        96
+      ],
+      "id": "6c4838ab-f886-455d-95a6-606108ba5365",
+      "name": "Preparar salida final"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [\n  {\n    json: {\n      ...$json,\n      area: $json.area || 'General',\n      respuesta: '',\n      fuente: 'No aplica',\n      nivel_confianza: 'Bajo',\n      requiere_intervencion_humana: false,\n      motivo_intervencion: 'Faltan datos obligatorios',\n      requirio_aprobacion: false,\n      resultado_aprobacion: 'No aplica',\n      estado: 'Error',\n      respuesta_final: '',\n      error: $json.error || 'La solicitud contiene datos incompletos'\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        96
+      ],
+      "id": "67a4107a-b1ee-4826-bd88-ed6238352574",
+      "name": "Preparar error de entrada"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "dataSourceId": {
+          "__rl": true,
+          "value": "3c487cc4-75a4-80fe-bfb0-000b47da759b",
+          "mode": "list",
+          "cachedResultName": "Registro de Consultas",
+          "cachedResultUrl": "https://app.notion.com/p/3c487cc475a480048b7bf84f14179ff9"
+        },
+        "title": "={{ $json.id_consulta }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Fecha y hora|date",
+              "date": "={{ $json.fecha_hora }}"
+            },
+            {
+              "key": "Empleado|rich_text",
+              "textContent": "={{ $json.empleado }}"
+            },
+            {
+              "key": "Área|select",
+              "selectValue": "={{ $json.area }}"
+            },
+            {
+              "key": "Consulta|rich_text",
+              "textContent": "={{ $json.consulta }}"
+            },
+            {
+              "key": "Respuesta generada|rich_text",
+              "textContent": "={{ $json.respuesta }}"
+            },
+            {
+              "key": "Fuente consultada|rich_text",
+              "textContent": "={{ $json.fuente }}"
+            },
+            {
+              "key": "Nivel de confianza|select",
+              "selectValue": "={{ $json.nivel_confianza }}"
+            },
+            {
+              "key": "Estado|select",
+              "selectValue": "={{ $json.estado }}"
+            },
+            {
+              "key": "Requirió aprobación|checkbox",
+              "checkboxValue": "={{ $json.requirio_aprobacion }}"
+            },
+            {
+              "key": "Resultado de aprobación|select",
+              "selectValue": "={{ $json.resultado_aprobacion }}"
+            },
+            {
+              "key": "Error|rich_text",
+              "textContent": "={{ $json.error }}"
+            },
+            {
+              "key": "Tiempo de respuesta|number",
+              "numberValue": "={{ Math.round((Date.now() - new Date($json.fecha_hora).getTime()) / 1000) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        896,
+        96
+      ],
+      "id": "0810c9be-77bc-4d03-b713-7df966a5b653",
+      "name": "Registrar error en Notion"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  id_consulta: $('Preparar error de entrada').first().json.id_consulta,\n  estado: 'Error',\n  error: $('Preparar error de entrada').first().json.error,\n  campos_faltantes: $('Preparar error de entrada').first().json.campos_faltantes\n}) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1120,
+        96
+      ],
+      "id": "9073babb-7e5a-4fee-b27a-082c81ef8023",
+      "name": "Responder error de entrada"
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = $('Validar entrada').first().json;\n\nconst detalleError =\n  $json.error?.message ??\n  $json.message ??\n  $json.description ??\n  'Fallo no identificado en la API de OpenAI';\n\nreturn [\n  {\n    json: {\n      ...entrada,\n      area: entrada.area || 'General',\n      respuesta: '',\n      fuente: 'OpenAI API',\n      nivel_confianza: 'Bajo',\n      requiere_intervencion_humana: false,\n      motivo_intervencion: 'Fallo de la API de OpenAI',\n      requirio_aprobacion: false,\n      resultado_aprobacion: 'No aplica',\n      estado: 'Error',\n      respuesta_final: '',\n      error: `Error de OpenAI: ${detalleError}`\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        256
+      ],
+      "id": "57b5a3da-b5f0-4b02-9bcd-63d5a60016e2",
+      "name": "Preparar error de OpenAI"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "dataSourceId": {
+          "__rl": true,
+          "value": "3c487cc4-75a4-80fe-bfb0-000b47da759b",
+          "mode": "list",
+          "cachedResultName": "Registro de Consultas",
+          "cachedResultUrl": "https://app.notion.com/p/3c487cc475a480048b7bf84f14179ff9"
+        },
+        "title": "={{ $json.id_consulta }}",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Fecha y hora|date",
+              "date": "={{ $json.fecha_hora }}"
+            },
+            {
+              "key": "Empleado|rich_text",
+              "textContent": "={{ $json.empleado }}"
+            },
+            {
+              "key": "Área|select",
+              "selectValue": "={{ $json.area }}"
+            },
+            {
+              "key": "Consulta|rich_text",
+              "textContent": "={{ $json.consulta }}"
+            },
+            {
+              "key": "Respuesta generada|rich_text",
+              "textContent": "={{ $json.respuesta }}"
+            },
+            {
+              "key": "Fuente consultada|rich_text",
+              "textContent": "={{ $json.fuente }}"
+            },
+            {
+              "key": "Nivel de confianza|select",
+              "selectValue": "={{ $json.nivel_confianza }}"
+            },
+            {
+              "key": "Estado|select",
+              "selectValue": "={{ $json.estado }}"
+            },
+            {
+              "key": "Requirió aprobación|checkbox",
+              "checkboxValue": "={{ $json.requirio_aprobacion }}"
+            },
+            {
+              "key": "Resultado de aprobación|select",
+              "selectValue": "={{ $json.resultado_aprobacion }}"
+            },
+            {
+              "key": "Error|rich_text",
+              "textContent": "={{ $json.error }}"
+            },
+            {
+              "key": "Tiempo de respuesta|number",
+              "numberValue": "={{ Math.round((Date.now() - new Date($json.fecha_hora).getTime()) / 1000) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        1712,
+        256
+      ],
+      "id": "26e0cede-82e6-448a-9ee8-49cffaa183e5",
+      "name": "Registrar error de OpenAI"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  id_consulta: $('Preparar error de OpenAI').first().json.id_consulta,\n  estado: 'Error',\n  origen: 'OpenAI API',\n  error: $('Preparar error de OpenAI').first().json.error\n}) }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1888,
+        256
+      ],
+      "id": "a54ee9bc-e8b8-4f33-9eef-33f59842f6e3",
+      "name": "Responder error de OpenAI"
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "update",
+        "pageId": {
+          "__rl": true,
+          "value": "={{ $('Registrar consulta en Notion').first().json.url }}",
+          "mode": "url"
+        },
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "Gmail Thread ID|rich_text",
+              "textContent": "={{ $json.threadId }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 3,
+      "position": [
+        3264,
+        96
+      ],
+      "id": "e3f31fa8-5a8c-43e9-9df1-063f554a1a3d",
+      "name": "Guardar Thread ID en Notion"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Sos un asistente interno especializado en procedimientos de trabajo.\n\nTu tarea es responder la consulta del empleado utilizando exclusivamente el contexto proporcionado desde la base de conocimiento de Notion.\n\nReglas obligatorias:\n\n1. No inventes procedimientos, pasos, plazos, condiciones ni fuentes.\n2. Si el contexto no contiene información suficiente, indicá que no existe información suficiente y solicitá revisión humana.\n3. Si existen datos contradictorios o falta información necesaria, el nivel de confianza debe ser Bajo y requiere intervención humana.\n4. Requiere intervención humana cuando la respuesta implique tomar una nueva decisión que pueda afectar al cliente, realizar una devolución de dinero, derivar el caso a un proveedor o cuando el procedimiento esté marcado como \"Requiere escalamiento: Sí\". No requiere intervención humana cuando la decisión ya fue aprobada y la consulta solamente solicita los pasos operativos posteriores de un procedimiento marcado como \"Requiere escalamiento: No\".\n5. La fuente debe indicar el nombre o ID del procedimiento utilizado.\n6. La respuesta debe ser clara, concreta y orientada a los pasos que debe seguir el empleado.\n7. Respondé únicamente con un objeto JSON válido, sin texto adicional ni bloques de código.\n\nUtilizá exactamente esta estructura:\n\n{\n  \"respuesta\": \"Procedimiento que debe seguir el empleado\",\n  \"fuente\": \"Nombre o ID del procedimiento utilizado\",\n  \"nivel_confianza\": \"Alto, Medio o Bajo\",\n  \"requiere_intervencion_humana\": true,\n  \"motivo_intervencion\": \"Motivo de la intervención o No aplica\"\n}"
+            },
+            {
+              "content": "=Empleado: {{ $json.empleado }}\n\nÁrea: {{ $json.area }}\n\nConsulta: {{ $json.consulta }}\n\nContexto recuperado desde Notion:\n\n{{ $json.contexto }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "maxTokens": 500,
+          "textFormat": {
+            "textOptions": {
+              "type": "json_schema",
+              "name": "respuesta_procedimiento",
+              "schema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"respuesta\": {\n      \"type\": \"string\"\n    },\n    \"fuente\": {\n      \"type\": \"string\"\n    },\n    \"nivel_confianza\": {\n      \"type\": \"string\",\n      \"enum\": [\"Alto\", \"Medio\", \"Bajo\"]\n    },\n    \"requiere_intervencion_humana\": {\n      \"type\": \"boolean\"\n    },\n    \"motivo_intervencion\": {\n      \"type\": \"string\"\n    }\n  },\n  \"required\": [\n    \"respuesta\",\n    \"fuente\",\n    \"nivel_confianza\",\n    \"requiere_intervencion_humana\",\n    \"motivo_intervencion\"\n  ],\n  \"additionalProperties\": false\n}"
+            }
+          }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        -96
+      ],
+      "id": "fda3baea-a4a4-4583-a824-83c1c937d863",
+      "name": "Generar respuesta con OpenAI",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "sendTo": "={{ $('Validar entrada').first().json.email_destino }}",
+        "subject": "=Aprobación requerida — Consulta {{ $json.id_consulta }}",
+        "message": "=Se requiere revisión humana para responder una consulta interna.\n\nID de consulta:\n{{ $json.id_consulta }}\n\nEmpleado:\n{{ $json.empleado }}\n\nÁrea:\n{{ $json.area }}\n\nConsulta:\n{{ $json.consulta }}\n\nRespuesta propuesta por el asistente:\n{{ $json.respuesta }}\n\nFuente consultada:\n{{ $json.fuente }}\n\nNivel de confianza:\n{{ $json.nivel_confianza }}\n\nMotivo de la intervención:\n{{ $json.motivo_intervencion }}\n\nRevisá la respuesta propuesta y seleccioná Aprobar o Rechazar.",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "approveLabel": "Aprobar",
+            "disapproveLabel": "Rechazar"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1888,
+        -128
+      ],
+      "id": "c91a204e-1d58-4200-93af-c678fc85af84",
+      "name": "Solicitar aprobación por Gmail",
+      "webhookId": "36194e15-fcfa-422b-bfa3-7b706746cbdb"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Validar entrada').first().json.email_destino }}",
+        "subject": "=Respuesta — Consulta {{ $json.id_consulta }}",
+        "message": "=Hola {{ $json.empleado }}:  La consulta fue procesada por el Asistente IA Interno de Procedimientos.  Consulta: {{ $json.consulta }}  Respuesta: {{ $json.respuesta }}  Fuente: {{ $json.fuente }}  Nivel de confianza: {{ $json.nivel_confianza }}  Resultado de aprobación: {{ $json.resultado_aprobacion }}  ID de consulta: {{ $json.id_consulta }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3072,
+        96
+      ],
+      "id": "3c0cbd27-43ec-47e9-ac67-05a2c570fa2b",
+      "name": "Enviar respuesta final por Gmail",
+      "webhookId": "7ca3fa9c-4396-4457-b8f5-cd53655652dc"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Preparar salida final').first().json) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3472,
+        96
+      ],
+      "id": "b0f85442-d14f-4912-8790-cd466cb8eadd",
+      "name": "Responder consulta por Webhook"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "asistente-procedimientos",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "a29cfc45-632b-43db-9928-f690873a9126",
+      "name": "Recibir consulta por Webhook",
+      "webhookId": "8fc8ce39-8195-4651-ac3b-09871172c50c"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Validar entrada": {
+      "main": [
+        [
+          {
+            "node": "¿Entrada válida?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Entrada válida?": {
+      "main": [
+        [
+          {
+            "node": "Obtener procedimientos de Notion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar error de entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Obtener procedimientos de Notion": {
+      "main": [
+        [
+          {
+            "node": "Preparar contexto para GPT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar contexto para GPT": {
+      "main": [
+        [
+          {
+            "node": "Generar respuesta con OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalizar respuesta GPT": {
+      "main": [
+        [
+          {
+            "node": "¿Requiere intervención humana?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Requiere intervención humana?": {
+      "main": [
+        [
+          {
+            "node": "Solicitar aprobación por Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar respuesta directa",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combinar resultado de aprobación": {
+      "main": [
+        [
+          {
+            "node": "¿Respuesta aprobada?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "¿Respuesta aprobada?": {
+      "main": [
+        [
+          {
+            "node": "Preparar respuesta aprobada",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar respuesta rechazada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar respuesta aprobada": {
+      "main": [
+        [
+          {
+            "node": "Registrar consulta en Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar respuesta rechazada": {
+      "main": [
+        [
+          {
+            "node": "Registrar consulta en Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar respuesta directa": {
+      "main": [
+        [
+          {
+            "node": "Registrar consulta en Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar consulta en Notion": {
+      "main": [
+        [
+          {
+            "node": "Preparar salida final",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar salida final": {
+      "main": [
+        [
+          {
+            "node": "Enviar respuesta final por Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar error de entrada": {
+      "main": [
+        [
+          {
+            "node": "Registrar error en Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar error en Notion": {
+      "main": [
+        [
+          {
+            "node": "Responder error de entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Preparar error de OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Registrar error de OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registrar error de OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Responder error de OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar Thread ID en Notion": {
+      "main": [
+        [
+          {
+            "node": "Responder consulta por Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar respuesta con OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Normalizar respuesta GPT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Preparar error de OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Solicitar aprobación por Gmail": {
+      "main": [
+        [
+          {
+            "node": "Combinar resultado de aprobación",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enviar respuesta final por Gmail": {
+      "main": [
+        [
+          {
+            "node": "Guardar Thread ID en Notion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recibir consulta por Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validar entrada",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "nodeGroups": [],
+  "tags": []
+}
