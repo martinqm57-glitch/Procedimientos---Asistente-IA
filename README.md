@@ -76,12 +76,12 @@ Se comprobaron al menos las siguientes rutas:
 
 ### Documentación
 
-- [Documentación final - Asistente IA](documentacion/Documentación%20final%20-%20Asistente%20IA.pdf)
-- [Evidencias operativas - Asistente IA](documentacion/Evidencias%20operativas%20-%20Asistente%20IA.pdf)
+- [Documentación final - Asistente IA](Documentacion/Documentación%20final%20-%20Asistente%20IA.pdf)
+- [Evidencias operativas - Asistente IA](Documentacion/Evidencias%20operativas%20-%20Asistente%20IA.pdf)
 
 ### Workflow
 
-- [Workflow n8n - Asistente IA](workflow/Workflow%20n8n%20-%20Asistente%20IA.json)
+- [Workflow n8n - Asistente IA](Workflow/Workflow%20n8n%20-%20Asistente%20IA.json)
 
 El archivo fue sanitizado antes de su publicación. No contiene API keys, tokens, contraseñas, correos personales, URLs completas del Webhook ni referencias a credenciales configuradas.
 
@@ -93,7 +93,7 @@ Al importarlo en n8n será necesario configurar credenciales propias para Notion
 - [Base de Conocimiento - Notion](https://dandelion-hill-970.notion.site/3c487cc475a480a3a558e23ef2667328?v=3c487cc475a480b2b6bd000cd79d4164)
 - **Video demo:** pendiente de incorporación.
 
-Los enlaces también se encuentran reunidos en [Enlaces del proyecto](enlaces/Enlaces%20del%20proyecto.md).
+Los enlaces también se encuentran reunidos en [Enlaces del proyecto](Enlaces/Enlaces%20del%20proyecto.md).
 
 ## Seguridad y privacidad
 
